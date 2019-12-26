@@ -7,6 +7,8 @@
 #include <queue>
 #include <unordered_map>
 
+constexpr int INVALID_CLIENT_ID = -1;
+
 struct ServerConfig;
 
 struct ServerEntity {
@@ -14,11 +16,45 @@ struct ServerEntity {
     bool active = false;
 };
 
-struct ConnectedClient {
-    ENetPeer *peer = nullptr;
-    peer_id_t entityId;
-    bool connected = false;
+class ConnectedClient
+{
+public:
+    bool isConnected() const
+    {
+        return entityId != INVALID_CLIENT_ID;
+    }
+    peer_id_t getID() const
+    {
+        return entityId;
+    }
+    ENetPeer* getPeer()
+    {
+        return peer;
+    }
+
+    void connect(ENetPeer* peera, peer_id_t id)
+    {
+        peer = peera;
+        entityId = id;
+    }
+
+    void disconnect()
+    {
+        peer = nullptr;
+        entityId = INVALID_CLIENT_ID;
+    }
+
+private:
+
+    ENetPeer* peer = nullptr;
+    peer_id_t entityId = INVALID_CLIENT_ID;
 };
+//
+//struct ConnectedClient {
+//    ENetPeer *peer = nullptr;
+//    peer_id_t entityId;
+//    bool connected = false;
+//};
 
 struct ChunkRequest {
     ChunkRequest(ChunkPosition &chunkPosition, peer_id_t peerId)

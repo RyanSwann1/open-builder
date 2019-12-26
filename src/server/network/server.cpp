@@ -18,7 +18,7 @@ Server::Server()
 
 void Server::sendChunk(peer_id_t peerId, const Chunk &chunk)
 {
-    if (!m_connectedClients[peerId].connected) {
+    if (!m_connectedClients[peerId].isConnected()) {
         return;
     }
     // Create the chunk-data packet
@@ -33,7 +33,7 @@ void Server::sendChunk(peer_id_t peerId, const Chunk &chunk)
                   chunk.blocks.size() * sizeof(chunk.blocks[0]));
 
     // Send chunk data to client
-    sendToPeer(m_connectedClients[peerId].peer, packet, 1,
+    sendToPeer(m_connectedClients[peerId].getPeer(), packet, 1,
                ENET_PACKET_FLAG_RELIABLE);
 }
 
@@ -105,7 +105,7 @@ void Server::sendPackets()
         u16 count = NetworkHost::getConnectedPeerCount();
         packet << ClientCommand::Snapshot << count;
         for (int i = 0; i < NetworkHost::getMaxConnections(); i++) {
-            if (m_connectedClients[i].connected) {
+            if (m_connectedClients[i].isConnected()) {
                 packet << static_cast<peer_id_t>(i) << m_entities[i].x
                        << m_entities[i].y << m_entities[i].z;
             }
@@ -133,7 +133,7 @@ void Server::sendPackets()
 int Server::findEmptySlot() const
 {
     for (int i = 0; i < NetworkHost::getMaxConnections(); i++) {
-        if (!m_connectedClients[i].connected) {
+        if (!m_connectedClients[i].isConnected()) {
             return i;
         }
     }
@@ -143,9 +143,7 @@ int Server::findEmptySlot() const
 void Server::addPeer(ENetPeer *peer, peer_id_t id)
 {
     LOGVAR("Server", "New Peer, Peer Id:", (int)id);
-    m_connectedClients[id].peer = peer;
-    m_connectedClients[id].connected = true;
-    m_connectedClients[id].entityId = id;
+    m_connectedClients[id].connect(peer, id);
 }
 
 void Server::removePeer(u32 connectionId)
@@ -153,21 +151,18 @@ void Server::removePeer(u32 connectionId)
     auto itr = std::find_if(
         m_connectedClients.begin(), m_connectedClients.end(),
         [this, &connectionId](auto &conn) {
-            return conn.peer && conn.peer->connectID == connectionId;
+            return conn.getPeer() && conn.getPeer()->connectID == connectionId;
         });
 
     assert(itr != m_connectedClients.end());
     if (itr != m_connectedClients.end()) {
-        LOGVAR("Server", "Client disconnected, Peer Id:", (int)itr->entityId);
-        m_entities[itr->entityId].active = false;
-        itr->connected = false;
-        itr->peer = nullptr;
-
+        LOGVAR("Server", "Client disconnected, Peer Id:", (int)itr->getID());
+       
+        m_entities[itr->getID()].active = false;
         // Broadcast the disconnection event
         sf::Packet announcement;
-        announcement << ClientCommand::PlayerLeave << itr->entityId;
+        announcement << ClientCommand::PlayerLeave << itr->getID();
         broadcastToPeers(announcement, 0, ENET_PACKET_FLAG_RELIABLE);
-
-        itr->entityId = 0;
+        itr->disconnect();
     }
 }
