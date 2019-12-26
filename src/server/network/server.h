@@ -14,11 +14,24 @@ struct ServerEntity {
     bool active = false;
 };
 
-struct Peer {
-    u32 id = 0;
+class Peer {
+  public:
+    Peer(ENetPeer *peer, peer_id_t ID)
+        : peer(peer)
+    {
+        peer->connectID = ID;
+    }
+
+
     ENetPeer *peer = nullptr;
-    bool isActive = false;
+    sf::Vector3f position;
 };
+
+// struct Peer {
+//    u32 id = 0;
+//    ENetPeer *peer = nullptr;
+//    bool isActive = false;
+//};
 
 struct ChunkRequest {
     ChunkRequest(ChunkPosition &chunkPosition, peer_id_t peerId)
@@ -50,18 +63,17 @@ class Server final : public NetworkHost {
     void handleCommandPlayerPosition(sf::Packet &packet);
     void handleCommandChunkRequest(sf::Packet &packet);
 
-    int emptySlot() const;
-
     void addPeer(ENetPeer *peer, peer_id_t id);
     void removePeer(u32 connectionId);
 
-    std::array<ServerEntity, 512> m_entities;
-    std::array<Peer, MAX_CONNECTIONS> m_peers{};
-
+    std::array<ServerEntity, 512> m_gameObjects;
+    std::vector<std::unique_ptr<Peer>> m_peers;
+    int m_peerID = 0;
     ChunkManager m_chunkManager;
     Chunk *m_spawn;
-
     std::queue<ChunkRequest> m_chunkRequests;
 
     bool m_isRunning = true;
+    bool isFull() const;
+    Peer *getPeer(peer_id_t peerID) const;
 };
