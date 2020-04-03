@@ -1,68 +1,95 @@
 #pragma once
 
-#include "client_engine.h"
-#include "gl/gl_object.h"
+#include "gl/shader.h"
+#include "gl/textures.h"
+#include "gl/vertex_array.h"
+#include "input/keyboard.h"
 #include "maths.h"
-#include "world/chunk_mesh.h"
-#include <SFML/Network/Packet.hpp>
-#include <SFML/Window/Keyboard.hpp>
-#include <SFML/Window/Window.hpp>
-#include <common/network/enet.h>
+#include "renderer/chunk_renderer.h"
+#include <SFML/Window/Mouse.hpp>
+#include <common/network/command_dispatcher.h>
 #include <common/network/net_host.h>
-#include <common/network/net_types.h>
 #include <common/world/chunk_manager.h>
+#include <common/world/voxel_data.h>
+#include <common/world/world_constants.h>
 #include <unordered_set>
 
 class Keyboard;
+struct InputState;
+
+namespace gui {
+    class LabelWidget;
+}
+
+struct VoxelUpdate {
+    VoxelPosition position;
+    voxel_t voxel = 0;
+};
 
 struct Entity final {
-    glm::vec3 position{0.0f, 0.0f, 12.0f}, rotation{0.0f};
+    glm::vec3 position{0.0f};
+    glm::vec3 rotation{0.0f};
+    glm::vec3 velocity{0.0f};
     bool active = false;
+
+    gl::Texture2d playerSkin; // May need to be relocated to its own Player Entity
 };
 
 class Client final : public NetworkHost {
   public:
     Client();
 
-    bool init(float aspect);
-    void handleInput(const sf::Window &window, const Keyboard &keyboard);
-    void onKeyRelease(sf::Keyboard::Key key);
+    bool init(const std::string& ipAddress);
+    void handleInput(const sf::Window& window, const Keyboard& keyboard,
+                     const InputState& inputState);
+    void onMouseRelease(sf::Mouse::Button button);
 
-    void update();
+    void update(float dt);
     void render();
     void endGame();
 
-    EngineStatus currentStatus() const;
-
   private:
-    // Network functions; defined in the src/client/network/ directory
-    void sendDisconnectRequest();
-    void sendPlayerPosition(const glm::vec3 &position);
-    void sendChunkRequest(const ChunkPosition &position);
+    // Network functions; defined in the src/client/network/client_command.cpp
+    // directory
+    void sendPlayerPosition(const glm::vec3& position);
+    void sendVoxelUpdate(const VoxelUpdate& update);
+    void sendPlayerSkin(const sf::Image& playerSkin);
 
-    void onPeerConnect(ENetPeer *peer) override;
-    void onPeerDisconnect(ENetPeer *peer) override;
-    void onPeerTimeout(ENetPeer *peer) override;
-    void onCommandRecieve(ENetPeer *peer, sf::Packet &packet,
-                          command_t command) override;
+    void onPeerConnect(ENetPeer* peer) override;
+    void onPeerDisconnect(ENetPeer* peer) override;
+    void onPeerTimeout(ENetPeer* peer) override;
+    void onCommandRecieve(ENetPeer* peer, sf::Packet& packet, command_t command) override;
 
-    void onPlayerJoin(sf::Packet &packet);
-    void onPlayerLeave(sf::Packet &packet);
-    void onSnapshot(sf::Packet &packet);
-    void onChunkData(sf::Packet &packet);
+    void onPlayerJoin(sf::Packet& packet);
+    void onPlayerLeave(sf::Packet& packet);
+    void onSnapshot(sf::Packet& packet);
+    void onChunkData(sf::Packet& packet);
+    void onSpawnPoint(sf::Packet& packet);
+    void onVoxelUpdate(sf::Packet& packet);
+    void onPlayerSkinReceive(sf::Packet& packet);
+
+    void onGameRegistryData(sf::Packet& packet);
     // End of network functions
 
-    int findChunkDrawableIndex(const ChunkPosition &position);
-
     // Network
-    ENetPeer *mp_serverPeer = nullptr;
+    ENetPeer* mp_serverPeer = nullptr;
+    CommandDispatcher<Client, ClientCommand> m_commandDispatcher;
+    bool m_hasReceivedGameData = false;
 
     // Rendering/ OpenGL stuff
+    ViewFrustum m_frustum{};
     glm::mat4 m_projectionMatrix{1.0f};
 
     gl::VertexArray m_cube;
-    gl::Texture2d m_texture;
-    gl::Texture2d m_grassTexture;
+
+    gl::VertexArray m_selectionBox;
+
+    gl::Texture2d m_errorSkinTexture;
+    sf::Image m_rawPlayerSkin;
+
+    gl::TextureArray m_voxelTextures;
+
+    ChunkRenderer m_chunkRenderer;
 
     struct {
         gl::Shader program;
@@ -72,23 +99,28 @@ class Client final : public NetworkHost {
 
     struct {
         gl::Shader program;
+        gl::UniformLocation modelLocation;
         gl::UniformLocation projectionViewLocation;
-    } m_chunkShader;
+    } m_selectionShader;
+
+    // For time-based render stuff eg waves in the water
+    sf::Clock m_clock;
 
     // Gameplay/ World
     std::array<Entity, 512> m_entities;
 
-    Entity *mp_player = nullptr;
+    VoxelPosition m_currentSelectedVoxelPos;
+    bool m_voxelSelected = false;
+    Entity* mp_player = nullptr;
 
     struct {
-        std::vector<ChunkMesh> bufferables;
-        std::vector<ChunkPosition> positions;
-        std::vector<gl::VertexArray> drawables;
         ChunkManager manager;
-        std::unordered_set<ChunkPosition, ChunkPositionHash> updates;
+        std::vector<ChunkPosition> updates;
+        std::vector<VoxelUpdate> voxelUpdates;
     } m_chunks;
 
-    // Engine-y stuff
-    EngineStatus m_status = EngineStatus::Ok;
-    bool m_isMouseLocked = false;
+    VoxelDataManager m_voxelData;
+
+    unsigned m_noMeshingCount = 0;
+    bool m_voxelMeshing = false;
 };

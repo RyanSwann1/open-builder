@@ -1,67 +1,79 @@
 #pragma once
 
+#include "../lua/server_lua_callback.h"
 #include <SFML/System/Time.hpp>
 #include <array>
+#include <common/lua/script_engine.h>
+#include <common/network/command_dispatcher.h>
 #include <common/network/net_host.h>
+#include <common/world/biome.h>
 #include <common/world/chunk_manager.h>
-#include <queue>
-#include <unordered_map>
+#include <common/world/voxel_data.h>
+#include <glm/gtc/matrix_transform.hpp>
 
 struct ServerConfig;
 
 struct ServerEntity {
-    float x = 0, y = 0, z = 0;
+    glm::vec3 position{0.0f};
     bool active = false;
+
+    std::vector<sf::Uint8> m_skinData;
+    bool hasSkin = false;
 };
 
-struct Peer {
-    u32 id = 0;
-    ENetPeer *peer = nullptr;
-    bool isActive = false;
-};
-
-struct ChunkRequest {
-    ChunkRequest(ChunkPosition &chunkPosition, peer_id_t peerId)
-        : position(chunkPosition)
-        , peer(peerId)
-    {
-    }
-
-    ChunkPosition position;
-    peer_id_t peer;
+struct ConnectedClient {
+    ENetPeer* peer = nullptr;
+    peer_id_t entityId = 0;
+    bool connected = false;
 };
 
 class Server final : public NetworkHost {
+    struct VoxelUpdate {
+        VoxelPosition position;
+        voxel_t voxel;
+    };
+
   public:
     Server();
 
-    void sendPackets();
+    void update();
 
   private:
-    void sendChunk(peer_id_t peerId, const Chunk &chunk);
+    glm::vec3 findPlayerSpawnPosition();
 
-    void onPeerConnect(ENetPeer *peer) override;
-    void onPeerDisconnect(ENetPeer *peer) override;
-    void onPeerTimeout(ENetPeer *peer) override;
-    void onCommandRecieve(ENetPeer *peer, sf::Packet &packet,
-                          command_t command) override;
+    void sendChunk(peer_id_t peerId, const ChunkPosition& chunk);
+    void sendPlayerSkin(peer_id_t peerId, std::optional<peer_id_t> toPeer = std::nullopt);
+    void sendGameData(peer_id_t peerId);
 
-    void handleCommandDisconnect(sf::Packet &packet);
-    void handleCommandPlayerPosition(sf::Packet &packet);
-    void handleCommandChunkRequest(sf::Packet &packet);
+    void onPeerConnect(ENetPeer* peer) override;
+    void onPeerDisconnect(ENetPeer* peer) override;
+    void onPeerTimeout(ENetPeer* peer) override;
+    void onCommandRecieve(ENetPeer* peer, sf::Packet& packet, command_t command) override;
 
-    int emptySlot() const;
+    void onPlayerPosition(sf::Packet& packet);
+    void onVoxelEdit(sf::Packet& packet);
+    void onPlayerSkin(sf::Packet& packet);
 
-    void addPeer(ENetPeer *peer, peer_id_t id);
+    int findEmptySlot() const;
+
+    void addPeer(ENetPeer* peer, peer_id_t id);
     void removePeer(u32 connectionId);
 
     std::array<ServerEntity, 512> m_entities;
-    std::array<Peer, MAX_CONNECTIONS> m_peers{};
+    std::array<ConnectedClient, MAX_CONNECTIONS> m_connectedClients{};
 
-    ChunkManager m_chunkManager;
-    Chunk *m_spawn;
-
-    std::queue<ChunkRequest> m_chunkRequests;
+    struct {
+        ChunkManager chunks;
+        std::vector<VoxelUpdate> voxelUpdates;
+    } m_world;
 
     bool m_isRunning = true;
+    const int m_worldSize;
+
+    ScriptEngine m_script;
+    ServerLuaCallbacks m_luaCallbacks;
+    VoxelDataManager m_voxelData;
+    BiomeDataManager m_biomeData;
+
+    CommandDispatcher<Server, ServerCommand> m_commandDispatcher;
 };

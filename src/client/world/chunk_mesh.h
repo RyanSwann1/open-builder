@@ -1,24 +1,33 @@
 #pragma once
 
-#include "../gl/gl_object.h"
+#include "../gl/vertex_array.h"
+#include <array>
 #include <common/world/coordinate.h>
 
 struct MeshFace {
-    std::array<GLfloat, 12> vertices;
-    GLfloat lightLevel;
+    std::array<GLbyte, 12> vertices;
+    GLbyte lightLevel;
 };
 
 struct ChunkMesh {
-
-    void addFace(const MeshFace &face, const BlockPosition &blockPosition);
+    ChunkMesh(const ChunkPosition& chunkPosition);
+    void addFace(const MeshFace& face, const VoxelPosition& voxelPosition,
+                 GLuint texture);
 
     gl::VertexArray createBuffer();
 
-    std::vector<float> vertices;
-    std::vector<GLfloat> textureCoords;
+    size_t calculateBufferSize() const;
+
+    std::vector<GLuint> vertexData;
     std::vector<GLuint> indices;
-    std::vector<GLfloat> cardinalLights;
     int indicesCount = 0;
 
     ChunkPosition position;
+};
+
+struct ChunkMeshCollection {
+    ChunkMeshCollection(const ChunkPosition& chunkPosition);
+    ChunkMesh voxelMesh;
+    ChunkMesh fluidMesh;
+    ChunkMesh floraMesh;
 };

@@ -1,6 +1,7 @@
 #include <common/debug.h>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -10,9 +11,9 @@
 #include "server/server_engine.h"
 
 #include "client/client_config.h"
-#include "server/server_config.h"
 
 #include <common/network/enet.h>
+#include <common/util/obd_parser.h>
 
 // Enable nvidia
 #ifdef _WIN32
@@ -24,177 +25,124 @@ _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
 #endif
 
 namespace {
-enum class LaunchType {
-    Server,
-    Client,
-    Both,
-};
+    enum class LaunchType {
+        Server,
+        Client,
+    };
 
-/**
- * @brief Holds config for both client and server
- */
-struct Config {
-    LaunchType launchType = LaunchType::Both;
+    /**
+     * @brief Loads config eg window size from the config.txt file
+     * @param config The config object to put the data into
+     */
+    void loadFromConfigFile()
+    {
+        auto data = getObdData("config.obd");
+        auto& config = ClientConfig::get();
 
-    ServerConfig serverOptions;
-    ClientConfig clientOptions;
-};
-
-/**
- * @brief Loads config eg window size from the config.txt file
- * @param config The config object to put the data into
- */
-void loadFromConfigFile(Config &config)
-{
-    std::ifstream inFile("config.txt");
-    std::string line;
-    int option;
-    while (inFile >> line >> option) {
-        if (line == "FULLSCREEN") {
-            config.clientOptions.fullScreen = option;
-        }
-        else if (line == "WIN_WIDTH") {
-            config.clientOptions.windowWidth = option;
-        }
-        else if (line == "WIN_HEIGHT") {
-            config.clientOptions.windowHeight = option;
-        }
-        else if (line == "FPS_CAPPED") {
-            config.clientOptions.isFpsCapped = option;
-        }
-        else if (line == "FPS") {
-            config.clientOptions.fpsLimit = option;
-        }
-        else if (line == "FOV") {
-            config.clientOptions.fov = option;
-        }
+        config.fullScreen = std::stoi(data["fullscreen"]);
+        config.windowWidth = std::stoi(data["window_width"]);
+        config.windowHeight = std::stoi(data["window_height"]);
+        config.isFpsCapped = std::stoi(data["cap_fps"]);
+        config.shouldShowInstructions = std::stoi(data["shouldShowInstructions"]);
+        config.fpsLimit = std::stoi(data["fps_limit"]);
+        config.fov = std::stoi(data["fov"]);
+        config.renderDistance = std::stoi(data["renderDistance"]);
+        config.fpsLimit = std::stoi(data["fps_limit"]);
+        config.verticalSensitivity = std::stof(data["vertical_sensitivity"]);
+        config.horizontalSensitivity = std::stof(data["horizontal_sensitivity"]);
+        config.skinName = data["skin"];
+        config.texturePack = data["texture_pack"];
     }
-}
 
-/**
- * @brief Parses the CLI arguments from the user
- * @param config The config to load data into
- * @param args CLI arguments paired as <argument, param>
- */
-void parseArgs(Config &config,
-               const std::vector<std::pair<std::string, std::string>> &args)
-{
-    for (const auto &option : args) {
-        // Set launch type to be server.
-        // Option: MAX_CONNECTIONS 2-16
-        if (option.first == "-server") {
-            config.launchType = LaunchType::Server;
-            try {
-                int maxConnections = std::stoi(option.second);
-                if (maxConnections < 2) {
-                    throw std::invalid_argument(
-                        "Max connections must be at least " +
-                        std::to_string(MIN_CONNECTIONS) + ".\n");
+    /**
+     * @brief Parses the CLI arguments from the user
+     * @param config The config to load data into
+     * @param args CLI arguments paired as <argument, param>
+     */
+    LaunchType parseArgs(const std::vector<std::pair<std::string, std::string>>& args)
+    {
+
+        LaunchType launchType = LaunchType::Client;
+        for (const auto& option : args) {
+            // Set launch type to be server.
+            // Option: MAX_CONNECTIONS 2-16
+            if (option.first == "-server") {
+                launchType = LaunchType::Server;
+                try {
+                    int maxConnections = std::stoi(option.second);
+                    if (maxConnections < 2) {
+                        throw std::invalid_argument("Max connections must be at least " +
+                                                    std::to_string(MIN_CONNECTIONS) +
+                                                    ".\n");
+                    }
+                    else if (maxConnections > 16) {
+                        throw std::invalid_argument("Max connections must be " +
+                                                    std::to_string(MAX_CONNECTIONS) +
+                                                    " or below.\n");
+                    }
                 }
-                else if (maxConnections > 16) {
-                    throw std::invalid_argument(
-                        "Max connections must be " +
-                        std::to_string(MAX_CONNECTIONS) + " or below.\n");
+                catch (std::invalid_argument& e) {
+                    std::cout << "Unable to set max connections, defaulting to "
+                                 "4. Reason: "
+                              << e.what() << "\n";
+                    // config.server.maxConnections = 4;
                 }
             }
-            catch (std::invalid_argument &e) {
-                std::cout << "Unable to set max connections, defaulting to "
-                             "4. Reason: "
-                          << e.what() << "\n";
-                config.serverOptions.maxConnections = 4;
+            else if (option.first == "-client") {
+                launchType = LaunchType::Client;
+            }
+            else if (option.first == "-skin") {
+                ClientConfig::get().skinName = option.second;
             }
         }
-        else if (option.first == "-client") {
-            config.launchType = LaunchType::Client;
-        }
-    }
-}
-
-/**
- * @brief Prints success message
- * @return int Exit success flag
- */
-int exitSuccess(const char *message = "Normal exit")
-{
-    std::cout << "Engine exited successfully.\"" << message << "\"."
-              << std::endl;
-    return EXIT_SUCCESS;
-}
-
-/**
- * @brief Prints failure message
- * @return int Exit failure flag
- */
-int exitFailure(const char *message)
-{
-    std::cerr << "Engine exited with error: \"" << message << "\"."
-              << std::endl;
-    return EXIT_FAILURE;
-}
-
-/**
- * @brief Launches the server
- * @param config Config to be used by the server engine
- * @param timeout How long the server waits for a connection before closing
- * @return int Exit success flag
- */
-int launchServer(const ServerConfig &config, sf::Time timeout = sf::seconds(8))
-{
-    LOG("Launcher", "Launching server");
-    runServerEngine(config, timeout);
-    LOG("Launcher", "Server has exited.");
-    return EXIT_SUCCESS;
-}
-
-/**
- * @brief Launches the client
- * @param config Config to be used by the client engine
- * @return int Exit flag (Success, or Failure)
- */
-int launchClient(const ClientConfig &config)
-{
-    LOG("Launcher", "Launching client");
-    switch (runClientEngine(config)) {
-        case EngineStatus::Exit:
-        case EngineStatus::Ok:
-            return exitSuccess();
-
-        case EngineStatus::ExitServerDisconnect:
-            return exitSuccess("Client was disconnected from the server.");
-
-        case EngineStatus::ExitServerTimeout:
-            return exitSuccess(
-                "Server timeout, client forcefully was disconnected.");
-
-        case EngineStatus::GLInitError:
-            return exitFailure("OpenGL failed to initilise correctly");
-
-        case EngineStatus::CouldNotConnect:
-            return exitFailure("Connection to server could not be established");
+        return launchType;
     }
 
-    return exitFailure("Unknown error");
-}
+    /**
+     * @brief Prints failure message
+     * @return int Exit failure flag
+     */
+    int exitFailure(const char* message)
+    {
+        std::cerr << "Engine exited with error: \"" << message << "\"." << '\n';
+        return EXIT_FAILURE;
+    }
 
-/**
- * @brief Launches both the client and the server
- * @param config The config to be used by client/server engines
- * @return int Exit flag (Success, or Failure)
- */
-int launchBoth(const Config &config)
-{
-    std::thread serverThread(launchServer, config.serverOptions,
-                             sf::milliseconds(5000));
-    int exit = launchClient(config.clientOptions);
-    serverThread.join();
-    return exit;
-}
+    void printInstructions()
+    {
+        const int width = 20;
+        auto printInstruction = [width](const char* input, const char* output) {
+            std::cout << std::setw(width) << std::left << output << input << '\n';
+        };
+        std::cout << "Take a look at the instructions before you play." << '\n'
+                  << "And also remember that the default configurations are on "
+                     "the config.obd file"
+                  << '\n';
+
+        std::cout << std::setw(width) << std::left << "Action"
+                  << "Key/Mouse" << '\n'
+                  << std::setw(width + 10) << std::setfill('-') << "" << '\n'
+                  << std::setfill(' ') << std::setw(width) << std::left;
+        printInstruction("W", "Move Forwards");
+        printInstruction("A", "Move Left");
+        printInstruction("S", "Move Back");
+        printInstruction("D", "Move Right");
+
+        printInstruction("CTRL", "Sprint");
+        printInstruction("Right Click", "Place A Voxel");
+        printInstruction("Left Click", "Removes A Voxel");
+
+        printInstruction("Move Mouse", "Look");
+
+        printInstruction("ESC", "Exit Game");
+
+        std::cout << "Press Enter to Continue...";
+        std::cin.ignore();
+    }
 } // namespace
 
-int main(int argc, char **argv)
+int main(int argc, char** argv)
 {
-    Config config;
-
     if (enet_initialize() != 0) {
         return exitFailure("Failed to initialise enet");
     }
@@ -206,19 +154,18 @@ int main(int argc, char **argv)
         }
     }
 
-    parseArgs(config, args);
-    loadFromConfigFile(config);
-
-    switch (config.launchType) {
-        case LaunchType::Both:
-            return launchBoth(config);
-
-        case LaunchType::Server:
-            return launchServer(config.serverOptions);
+    loadFromConfigFile();
+    switch (parseArgs(args)) {
+        case LaunchType::Server: {
+            ServerLauncher launcher(sf::seconds(0));
+            launcher.run();
             break;
+        }
 
-        case LaunchType::Client:
-            return launchClient(config.clientOptions);
+        case LaunchType::Client: {
+            runClientEngine();
+            break;
+        }
     }
 
     enet_deinitialize();

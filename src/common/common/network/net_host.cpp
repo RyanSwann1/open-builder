@@ -4,80 +4,79 @@
 #include "net_constants.h"
 
 #include <SFML/System/Clock.hpp>
+#include <thread>
 
 namespace {
-ENetHost *createHost(const ENetAddress *address, int connections)
-{
-    return enet_host_create(address, connections, 2, 0, 0);
-}
-
-ENetPeer *connectHostTo(ENetHost *host, const std::string &ip)
-{
-    ENetAddress address{};
-    address.port = DEFAULT_PORT;
-    if (enet_address_set_host(&address, ip.c_str()) != 0) {
-        LOG("Connection", "Failed to create address.");
-        return nullptr;
+    ENetHost* createHost(const ENetAddress* address, int connections)
+    {
+        return enet_host_create(address, connections, 2, 0, 0);
     }
 
-    ENetPeer *peer = enet_host_connect(host, &address, 2, 0);
-    if (!peer) {
-        LOG("Connection", "Failed to connect to server (Game Full).");
-        return nullptr;
-    }
+    ENetPeer* connectHostTo(ENetHost* host, const std::string& ip)
+    {
+        ENetAddress address{};
+        address.port = DEFAULT_PORT;
+        if (enet_address_set_host(&address, ip.c_str()) != 0) {
+            LOG("Connection", "Failed to create address.");
+            return nullptr;
+        }
 
-    ENetEvent event;
-    if (enet_host_service(host, &event, 5000) > 0 &&
-        event.type == ENET_EVENT_TYPE_CONNECT) {
+        ENetPeer* peer = enet_host_connect(host, &address, 2, 0);
+        if (!peer) {
+            LOG("Connection", "Failed to connect to server (Game Full).");
+            return nullptr;
+        }
         return peer;
     }
-    else {
-        LOG("Connection", "Failed to connect to the server");
-        enet_peer_reset(peer);
-        return nullptr;
-    }
-}
 
-int getPeerIdFromServer(ENetHost *host)
-{
-    int id = -1;
-    sf::Clock test;
-    ENetEvent event;
-    while (test.getElapsedTime().asSeconds() < 2.0f) {
-        enet_host_service(host, &event, 0);
-        if (event.type == ENET_EVENT_TYPE_RECEIVE) {
-            ClientCommand command;
-            sf::Packet packet;
-            packet.append(event.packet->data, event.packet->dataLength);
-            packet >> command;
-            if (command == ClientCommand::PeerId) {
-                peer_id_t peerId;
-                packet >> peerId;
-                id = peerId;
-                break;
+    int getPeerIdFromServer(ENetHost* host)
+    {
+        int id = -1;
+        sf::Clock test;
+        ENetEvent event;
+        while (test.getElapsedTime().asSeconds() < 2.0f) {
+            enet_host_service(host, &event, 0);
+            if (event.type == ENET_EVENT_TYPE_RECEIVE) {
+                ClientCommand command;
+                sf::Packet packet;
+                packet.append(event.packet->data, event.packet->dataLength);
+                packet >> command;
+                if (command == ClientCommand::PeerId) {
+                    peer_id_t peerId;
+                    packet >> peerId;
+                    id = peerId;
+                    break;
+                }
             }
         }
+        return id;
     }
-    return id;
-}
 
-ENetPacket *createPacket(sf::Packet &packet, u32 flags)
-{
-    return enet_packet_create(packet.getData(), packet.getDataSize(), flags);
-}
+    ENetPacket* createPacket(sf::Packet& packet, u32 flags)
+    {
+        return enet_packet_create(packet.getData(), packet.getDataSize(), flags);
+    }
 } // namespace
 
-NetworkHost::NetworkHost(std::string &&name)
+NetworkHost::NetworkHost(std::string&& name)
     : m_name(std::move(name))
 {
 }
 
 NetworkHost::~NetworkHost()
 {
-    enet_host_destroy(mp_host);
+    destroy();
 }
 
-std::optional<ENetPeer *> NetworkHost::createAsClient(const std::string &ip)
+void NetworkHost::destroy()
+{
+    if (mp_host) {
+        enet_host_destroy(mp_host);
+        mp_host = nullptr;
+    }
+}
+
+std::optional<ENetPeer*> NetworkHost::createAsClient(const std::string& ip)
 {
     mp_host = createHost(0, 1);
     if (!mp_host) {
@@ -86,11 +85,12 @@ std::optional<ENetPeer *> NetworkHost::createAsClient(const std::string &ip)
     }
 
     auto server = connectHostTo(mp_host, ip);
+
     if (!server) {
-        LOG(m_name.c_str(), "Error: Failed to connect to server (Game Full).");
+        LOG(m_name.c_str(), "Error: Failed to connect to server.");
         return {};
     }
-    flush();
+    enet_host_flush(mp_host);
 
     int id = getPeerIdFromServer(mp_host);
     if (id == -1) {
@@ -111,7 +111,7 @@ bool NetworkHost::createAsServer(int maxConnections)
     return mp_host;
 }
 
-void NetworkHost::disconnectFromPeer(ENetPeer *peer)
+void NetworkHost::disconnectFromPeer(ENetPeer* peer)
 {
     enet_peer_disconnect(peer, static_cast<u32>(m_peerId));
     ENetEvent event;
@@ -122,7 +122,7 @@ void NetworkHost::disconnectFromPeer(ENetPeer *peer)
                 break;
 
             case ENET_EVENT_TYPE_DISCONNECT:
-                flush();
+                enet_host_flush(mp_host);
                 return;
 
             default:
@@ -173,24 +173,21 @@ int NetworkHost::getMaxConnections() const
     return m_maxConnections;
 }
 
-bool NetworkHost::sendToPeer(ENetPeer *peer, sf::Packet &packet, u8 channel,
-                             u32 flags)
+void NetworkHost::sendToPeer(ENetPeer* peer, sf::Packet& packet, u8 channel, u32 flags)
 {
-    ENetPacket *pkt = createPacket(packet, flags);
-    int result = enet_peer_send(peer, channel, pkt);
-    flush();
-    return result == 0;
+    ENetPacket* pkt = createPacket(packet, flags);
+    enet_peer_send(peer, channel, pkt);
 }
 
-void NetworkHost::broadcastToPeers(sf::Packet &packet, u8 channel, u32 flags)
+void NetworkHost::broadcastToPeers(sf::Packet& packet, u8 channel, u32 flags)
 {
-    ENetPacket *pkt = createPacket(packet, flags);
+    ENetPacket* pkt = createPacket(packet, flags);
     enet_host_broadcast(mp_host, channel, pkt);
-    flush();
 }
 
 void NetworkHost::tick()
 {
+    assert(mp_host);
     ENetEvent event;
     while (enet_host_service(mp_host, &event, 0) > 0) {
         switch (event.type) {
@@ -217,16 +214,11 @@ void NetworkHost::tick()
     }
 }
 
-void NetworkHost::onCommandRecieve(ENetPeer *peer, const ENetPacket &enetPacket)
+void NetworkHost::onCommandRecieve(ENetPeer* peer, const ENetPacket& enetPacket)
 {
     sf::Packet packet;
     packet.append(enetPacket.data, enetPacket.dataLength);
     command_t command;
     packet >> command;
     onCommandRecieve(peer, packet, command);
-}
-
-void NetworkHost::flush()
-{
-    enet_host_flush(mp_host);
 }

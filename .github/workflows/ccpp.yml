@@ -7,11 +7,15 @@ jobs:
       runs-on: ${{ matrix.os }}
       strategy:
         matrix:
-          os: [ ubuntu-18.04, ubuntu-latest ]
-          compiler: [ g++, clang++ ]
+          os: [ ubuntu-18.04 ]
+          compiler: [ g++ ]
       name: ${{ matrix.compiler }} on ${{ matrix.os }}
       steps:
-        - uses: actions/checkout@master
-        - run: |
-            sudo bash scripts/install.sh
-            sh scripts/tests.sh
+      - name: Checkout code
+        uses: actions/checkout@master
+      - name: Install dependencies
+        run: sudo bash scripts/install.sh --no-build
+      - name: Normal build
+        run: export CC=gcc-8 && export CXX=g++-8 && sh scripts/build.sh
+      - name: Normal build unit tests
+        run: sh scripts/tests.sh

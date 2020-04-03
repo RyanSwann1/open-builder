@@ -6,7 +6,11 @@
 #include "net_constants.h"
 #include <SFML/Network/Packet.hpp>
 #include <array>
+#include <deque>
+#include <iostream>
 #include <optional>
+
+#include <SFML/System/Clock.hpp>
 
 /**
  * @brief Base class for network hosts (clients/ servers)
@@ -16,9 +20,11 @@ class NetworkHost {
     NON_MOVEABLE(NetworkHost)
 
   public:
-    NetworkHost(std::string &&name);
+    NetworkHost(std::string&& name);
 
     virtual ~NetworkHost();
+
+    void destroy();
 
     /**
      * @brief Does 1 tick of the host, must be called once per frame.
@@ -31,10 +37,11 @@ class NetworkHost {
      * @brief Creates as a client, and connects the host to a server
      *
      * @param ip The IP address of the server
+     * @param timeout How long the client waits for a connection before closing
      * @return std::optional<ENetPeer *> The server peer, might not be
      * successful connection hence optional
      */
-    std::optional<ENetPeer *> createAsClient(const std::string &ip);
+    std::optional<ENetPeer*> createAsClient(const std::string& ip);
 
     /**
      * @brief Sets up the host to be a server
@@ -50,7 +57,7 @@ class NetworkHost {
      *
      * @param peer The peer to disconnect from
      */
-    void disconnectFromPeer(ENetPeer *peer);
+    void disconnectFromPeer(ENetPeer* peer);
 
     /**
      * @brief Disconnects all peers from this host
@@ -72,7 +79,7 @@ class NetworkHost {
      * @return true The packet was sent successfully
      * @return false The packet was not sent
      */
-    bool sendToPeer(ENetPeer *peer, sf::Packet &packet, u8 channel, u32 flags);
+    void sendToPeer(ENetPeer* peer, sf::Packet& packet, u8 channel, u32 flags);
 
     /**
      * @brief Broadcasts a packet to all connected peers
@@ -81,22 +88,20 @@ class NetworkHost {
      * @param channel The channel ID to send the packet on
      * @param flags Flags for the packet (ENetPacketFlag)
      */
-    void broadcastToPeers(sf::Packet &packet, u8 channel, u32 flags);
+    void broadcastToPeers(sf::Packet& packet, u8 channel, u32 flags);
 
   private:
-    virtual void onPeerConnect(ENetPeer *peer) = 0;
-    virtual void onPeerDisconnect(ENetPeer *peer) = 0;
-    virtual void onPeerTimeout(ENetPeer *peer) = 0;
-    virtual void onCommandRecieve(ENetPeer *peer, sf::Packet &packet,
+    virtual void onPeerConnect(ENetPeer* peer) = 0;
+    virtual void onPeerDisconnect(ENetPeer* peer) = 0;
+    virtual void onPeerTimeout(ENetPeer* peer) = 0;
+    virtual void onCommandRecieve(ENetPeer* peer, sf::Packet& packet,
                                   command_t command) = 0;
 
-    void onCommandRecieve(ENetPeer *peer, const ENetPacket &packet);
+    void onCommandRecieve(ENetPeer* peer, const ENetPacket& packet);
 
-    void flush();
-
-    ENetHost *mp_host = nullptr;
+    ENetHost* mp_host = nullptr;
     const std::string m_name;
 
     peer_id_t m_peerId = 0;
-    int m_maxConnections;
+    int m_maxConnections = 0;
 };

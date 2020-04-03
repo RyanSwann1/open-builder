@@ -1,22 +1,37 @@
 #include "chunk_mesh.h"
 
 #include <common/world/world_constants.h>
+namespace {
+    template <typename T>
+    size_t vecSize(const std::vector<T> vect)
+    {
+        return vect.size() * sizeof(vect[0]);
+    }
+} // namespace
 
-void ChunkMesh::addFace(const MeshFace &face,
-                        const BlockPosition &blockPosition)
+ChunkMesh::ChunkMesh(const ChunkPosition& chunkPosition)
+    : position(chunkPosition)
+{
+    vertexData.reserve(CHUNK_VOLUME * 2);
+    indices.reserve(CHUNK_VOLUME * 2);
+}
+
+void ChunkMesh::addFace(const MeshFace& face, const VoxelPosition& voxelPosition,
+                        GLuint texture)
 {
     int index = 0;
-    for (int i = 0; i < 4; i++) {
-        vertices.push_back(face.vertices[index++] + position.x * CHUNK_SIZE +
-                           blockPosition.x);
-        vertices.push_back(face.vertices[index++] + position.y * CHUNK_SIZE +
-                           blockPosition.y);
-        vertices.push_back(face.vertices[index++] + position.z * CHUNK_SIZE +
-                           blockPosition.z);
-        cardinalLights.push_back(face.lightLevel);
+    for (unsigned i = 0; i < 4; i++) {
+        GLubyte x = face.vertices[index++] + voxelPosition.x;
+        GLubyte y = face.vertices[index++] + voxelPosition.y;
+        GLubyte z = face.vertices[index++] + voxelPosition.z;
+
+        // Packs the vertex coordinates, cardinal light, and texture coordinates into 4
+        // bytes
+        GLuint vertex =
+            x | y << 6 | z << 12 | face.lightLevel << 18 | i << 21 | texture << 23;
+
+        vertexData.push_back(vertex);
     }
-    textureCoords.insert(textureCoords.end(),
-                         {0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f});
     indices.push_back(indicesCount);
     indices.push_back(indicesCount + 1);
     indices.push_back(indicesCount + 2);
@@ -28,14 +43,21 @@ void ChunkMesh::addFace(const MeshFace &face,
 
 gl::VertexArray ChunkMesh::createBuffer()
 {
-
     gl::VertexArray vao;
-    vao.create();
     vao.bind();
-    vao.addVertexBuffer(3, vertices);
-    vao.addVertexBuffer(2, textureCoords);
-    vao.addVertexBuffer(1, cardinalLights);
+    vao.addVertexBuffer(1, vertexData);
     vao.addIndexBuffer(indices);
-
     return vao;
+}
+
+size_t ChunkMesh::calculateBufferSize() const
+{
+    return vecSize(vertexData) + vecSize(indices);
+}
+
+ChunkMeshCollection::ChunkMeshCollection(const ChunkPosition& chunkPosition)
+    : voxelMesh(chunkPosition)
+    , fluidMesh(chunkPosition)
+    , floraMesh(chunkPosition)
+{
 }

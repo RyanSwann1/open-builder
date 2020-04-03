@@ -30,37 +30,77 @@ enum class ClientCommand : command_t {
     // float[3]: The X, Y, Z position of the entity
     Snapshot,
 
-    // The block data of a chunk
+    // The voxel data of a chunk
     // Data:
     // i32[3] The position of the chunk
-    // block[CHUNK_VOLUME] The block data
-    ChunkData
+    // voxel[CHUNK_VOLUME] The voxel data
+    ChunkData,
+
+    // Position for player when they spawn
+    // Data:
+    // float[3]: The X, Y, Z position of the entity
+    SpawnPoint,
+
+    // Command to say that a voxel was updated
+    // Data:
+    // u32: Number of voxel updates
+    // [For each voxel update...]
+    // i32[3]: The X, Y, Z position of the voxel edit
+    // voxel_t: The voxel it has been changed to
+    VoxelUpdate,
+
+    // Command to update the skin of a player in-game
+    // Data:
+    // peer_id_t: The ID of the player
+    // u8[8192]: Skin data (RGBA8 format)
+    NewPlayerSkin,
+
+    // The data needed for the voxels, entities etc
+    // The client will not process data/render anything until this has been
+    // recieved
+    // Data:
+    // u16: Number of voxel types
+    // [For each voxel type (Sent in order of Voxel ID)...]
+    // String: name
+    // String: the voxel's top texture
+    // String: the voxel's side texture
+    // String: the voxel's bottom texture
+    // u8: The voxels mesh style aka VoxelMeshStyle
+    // u8: The voxels state/type aka VoxelType
+    // u8: Whether the voxel is collidable or not
+    GameRegistryData,
+
+    // For getting the number of commands, used by CommandDispatcher
+    COUNT,
 };
 
 /**
         Commands to be sent to server
 */
 enum class ServerCommand : command_t {
-    // Command to connect to a server
-    // Data:
-    // peer_id_t: The ID of the player trying to leave
-    Disconnect,
-
     // Command to tell server the position of a player
     // Data:
     // peer_id_t: The player which position is being sent
     // float[3]: The x, y, z position of the player
     PlayerPosition,
 
-    // Client is requesting some data about world
+    // Command to say that a voxel was edited
     // Data:
-    // peer_id_t: The peer requesting the chunk data
-    // i32[3] The position of the chunk
-    ChunkRequest,
+    // i32[3]: The X, Y, Z position of the voxel edit
+    // voxel_t: The voxel it has been changed to
+    VoxelEdit,
+
+    // Command that sends the player's skin
+    // Data:
+    // u8[8192]: Imaga Data in RGBA format (Should be 8kb)
+    PlayerSkin,
+
+    // For getting the number of commands, used by CommandDispatcher
+    COUNT,
 };
 
 template <typename CommandType>
-sf::Packet &operator>>(sf::Packet &packet, CommandType &command)
+sf::Packet& operator>>(sf::Packet& packet, CommandType& command)
 {
     command_t commandId;
     packet >> commandId;
@@ -69,7 +109,7 @@ sf::Packet &operator>>(sf::Packet &packet, CommandType &command)
 }
 
 template <typename CommandType>
-sf::Packet &operator<<(sf::Packet &packet, CommandType command)
+sf::Packet& operator<<(sf::Packet& packet, CommandType command)
 {
     packet << static_cast<command_t>(command);
     return packet;

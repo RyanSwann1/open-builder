@@ -1,57 +1,86 @@
 #include "server_engine.h"
 #include "network/server.h"
-#include "server_config.h"
 #include <SFML/System/Clock.hpp>
-
 #include <atomic>
+#include <common/debug.h>
 #include <iostream>
 #include <thread>
 
-void runServerEngine(const ServerConfig &config, sf::Time timeout)
+ServerLauncher::ServerLauncher(sf::Time timeout)
+    : m_timeout(timeout)
 {
-    Server engine;
-    engine.createAsServer(config.maxConnections);
+}
 
-    std::atomic<bool> serverRunning = true;
-    std::atomic<bool> serverConsoleRunning = true;
+ServerLauncher::~ServerLauncher()
+{
+    stop();
+}
 
-    std::thread console([&serverRunning, &serverConsoleRunning]() {
-        std::string line;
-        std::cout << "This is the server console. You can enter commands here.";
-        std::cout << "Server console: Enter exit to shut down server.";
-        while (serverRunning) {
-            std::cout << "> ";
-            std::getline(std::cin, line);
+void ServerLauncher::run()
+{
 
-            if (std::cin.eof() || line == "exit") {
-                serverRunning = false;
-                serverConsoleRunning = false;
-                return;
+    std::cout << "Server Console Commands:\n"
+              << "exit - Exits server and disconnects everyone\n\n";
+
+    m_serverThread = std::make_unique<std::thread>([this] {
+        std::string input;
+        while (m_isServerRunning) {
+            std::cin >> input;
+
+            if (input == "exit") {
+                std::cout << "Exiting Server.\n\n";
+                m_isServerRunning = false;
             }
         }
     });
 
+    launch();
+}
+
+void ServerLauncher::runAsThread()
+{
+    m_serverThread = std::make_unique<std::thread>([this] { launch(); });
+}
+
+void ServerLauncher::launch()
+{
+    if (!m_server.createAsServer(16)) {
+        std::cout << "Failed to create server.\n\n";
+        return;
+    }
     sf::Clock clock;
-    while (serverRunning) {
+    m_isServerRunning = true;
+    LOG("Server", "Server has been launched.");
+    while (m_isServerRunning) {
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
         // Server updates
-        engine.tick();
-        engine.sendPackets();
+        m_server.tick();
+        m_server.update();
 
         // Exit the server if there is no connections
-        if (engine.getConnectedPeerCount() == 0) {
-            serverRunning = clock.getElapsedTime() < timeout;
-        }
-        else {
-            clock.restart();
+        if (m_timeout > sf::seconds(0)) {
+            if (m_server.getConnectedPeerCount() == 0) {
+                m_isServerRunning = clock.getElapsedTime() < m_timeout;
+            }
+            else {
+                clock.restart();
+            }
         }
     }
-    engine.disconnectAllPeers();
-    if (serverConsoleRunning) {
-        std::cout
-            << "Server console is still active.\nPlease type anything to exit."
-            << std::endl;
+    LOG("Server", "Server stopped.");
+}
+
+void ServerLauncher::stop()
+{
+    if (m_serverThread && m_serverThread->joinable()) {
+        m_isServerRunning = false;
+        if (m_serverThread->joinable()) {
+            m_serverThread->join();
+        }
+
+        m_server.disconnectAllPeers();
+        m_server.destroy();
+        LOG("Server", "Server has exited.");
     }
-    console.join();
 }
